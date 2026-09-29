@@ -60,9 +60,12 @@ class _NodeResourceSpec:
     def of(cls, *, cpu=0, gpu=0, mem=0):
         cpu = math.floor(cpu)
         gpu = math.floor(gpu)
-        # Round memory to the nearest 0.1 GiB so that nodes of the same type
+        # Round memory down to a multiple of 0.1 GiB so that nodes of the same type
         # with slightly different reported physical memory are grouped together.
-        mem = int(round(mem / GiB, 1) * GiB) if mem > 0 else 0
+        # Round down rather than to the nearest value: the spec is sent back as a
+        # resource request, and rounding up would ask for more memory than the
+        # node it came from has, which no node type can satisfy.
+        mem = math.floor(mem) * 10 // GiB * GiB // 10 if mem > 0 else 0
         return cls(cpu=cpu, gpu=gpu, mem=mem)
 
     @classmethod

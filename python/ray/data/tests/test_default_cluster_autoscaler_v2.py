@@ -877,12 +877,25 @@ class TestClusterAutoscaling:
         """Test that nodes with slightly different memory are grouped together.
 
         Nodes of the same type can report slightly different physical memory
-        (e.g. 14.85 GiB vs 14.94 GiB) due to non-deterministic physical memory
+        (e.g. 14.91 GiB vs 14.98 GiB) due to non-deterministic physical memory
         availability at Ray init time. They should produce the same spec.
         """
-        spec_a = _NodeResourceSpec.of(cpu=8, gpu=0, mem=int(14.87 * GiB))
-        spec_b = _NodeResourceSpec.of(cpu=8, gpu=0, mem=int(14.93 * GiB))
+        spec_a = _NodeResourceSpec.of(cpu=8, gpu=0, mem=int(14.91 * GiB))
+        spec_b = _NodeResourceSpec.of(cpu=8, gpu=0, mem=int(14.98 * GiB))
         assert spec_a == spec_b
+
+    @pytest.mark.parametrize(
+        "mem", [int(15.97 * GiB), int(0.29 * GiB), 16 * GiB, 16 * GiB - 1, 1000]
+    )
+    def test_node_resource_spec_memory_not_rounded_up(self, mem):
+        """The spec is sent back as a resource request, so its memory must never
+        exceed the memory of the node it was derived from.
+
+        Regression test for https://github.com/ray-project/ray/issues/65237.
+        """
+        spec = _NodeResourceSpec.of(cpu=8, gpu=0, mem=mem)
+        assert spec.to_bundle()["memory"] <= mem
+        assert mem - spec.mem <= GiB // 10
 
     def test_debug_log_when_autoscaling_disabled(self, propagate_logs, caplog):
         """Test that autoscaling log is at DEBUG level when autoscaling is disabled."""

@@ -14,6 +14,7 @@ from ray.data._internal.datasource.lance_datasink import (
     _WRITE_LANCE_FRAGMENTS_DESCRIPTION,
     LanceDatasink,
     _align_block_to_schema,
+    _namespace_kwargs,
     _null_column,
     _write_fragment,
 )
@@ -517,6 +518,54 @@ def test_lance_namespace_write_rejects_non_create_mode(monkeypatch, mode):
             namespace_impl="dir",
             namespace_properties={"path": "/tmp/ns"},
         )
+
+
+def test_namespace_kwargs_without_namespace():
+    def fn(uri, *, storage_options_provider=None):
+        pass
+
+    assert _namespace_kwargs(fn, None, None, None) == {}
+
+
+def test_namespace_kwargs_matches_lance_signature(monkeypatch):
+    namespace = object()
+    table_id = ["db", "table"]
+    monkeypatch.setattr(
+        "ray.data._internal.datasource.lance_datasink.get_or_create_namespace",
+        lambda namespace_impl, namespace_properties: namespace,
+    )
+    monkeypatch.setattr(
+        "ray.data._internal.datasource.lance_datasink.create_storage_options_provider",
+        lambda namespace_impl, namespace_properties, table_id: "provider",
+    )
+
+    # PyLance >= 6.0.
+    def new_fn(uri, *, namespace_client=None, table_id=None):
+        pass
+
+    assert _namespace_kwargs(new_fn, "dir", {}, table_id) == {
+        "namespace_client": namespace,
+        "table_id": table_id,
+    }
+
+    # PyLance < 6.0.
+    def old_fn(uri, *, storage_options_provider=None):
+        pass
+
+    assert _namespace_kwargs(old_fn, "dir", {}, table_id) == {
+        "storage_options_provider": "provider"
+    }
+
+
+def test_lance_write_passes_only_supported_kwargs(tmp_path, ray_start_regular_shared):
+    # Regression test for https://github.com/ray-project/ray/issues/65129.
+    path = os.path.join(str(tmp_path), "data.lance")
+    ray.data.range(10).write_lance(path)
+    ray.data.range(10, override_num_blocks=2).write_lance(path, mode=SaveMode.APPEND)
+
+    assert sorted(r["id"] for r in ray.data.read_lance(path).take_all()) == sorted(
+        list(range(10)) * 2
+    )
 
 
 @pytest.mark.parametrize(

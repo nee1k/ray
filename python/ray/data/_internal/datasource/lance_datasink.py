@@ -1,3 +1,4 @@
+import inspect
 import pickle
 from itertools import chain
 from typing import (
@@ -55,6 +56,38 @@ def _declare_table_with_fallback(
         create_request = CreateEmptyTableRequest(id=table_id)
         create_response = namespace.create_empty_table(create_request)
         return create_response.location, create_response.storage_options
+
+
+def _namespace_kwargs(
+    fn: Callable,
+    namespace_impl: Optional[str],
+    namespace_properties: Optional[Dict[str, str]],
+    table_id: Optional[List[str]],
+) -> Dict[str, Any]:
+    """Build the namespace keyword arguments that ``fn`` accepts.
+
+    PyLance 6.0 removed ``storage_options_provider`` in favor of
+    ``namespace_client``/``table_id``. Inspect ``fn``'s signature to pass the
+    right one for the installed version, and pass nothing when no namespace is
+    configured so plain URI writes work on every version.
+    """
+    if table_id is None:
+        return {}
+    namespace = get_or_create_namespace(namespace_impl, namespace_properties)
+    if namespace is None:
+        return {}
+
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if "namespace_client" in params:
+        return {"namespace_client": namespace, "table_id": table_id}
+    return {
+        "storage_options_provider": create_storage_options_provider(
+            namespace_impl, namespace_properties, table_id
+        )
+    }
 
 
 def _make_stream_factory(
@@ -189,7 +222,8 @@ def _write_fragment(
         DEFAULT_MAX_BYTES_PER_FILE if max_bytes_per_file is None else max_bytes_per_file
     )
 
-    storage_options_provider = create_storage_options_provider(
+    namespace_kwargs = _namespace_kwargs(
+        write_fragments,
         namespace_impl,
         namespace_properties,
         table_id,
@@ -208,7 +242,7 @@ def _write_fragment(
             max_bytes_per_file=max_bytes_per_file,
             data_storage_version=data_storage_version,
             storage_options=storage_options,
-            storage_options_provider=storage_options_provider,
+            **namespace_kwargs,
         )
 
     fragments = call_with_retry(_write_once, **retry_params)
@@ -285,12 +319,12 @@ class _BaseLanceDatasink(Datasink):
         self.read_version: Optional[int] = None
         self.storage_options = merged_storage_options
 
-    @property
-    def storage_options_provider(self):
-        """Lazily create storage options provider using namespace_impl/properties."""
+    def _namespace_kwargs(self, fn: Callable) -> Dict[str, Any]:
+        """Namespace keyword arguments to pass to the Lance API ``fn``."""
         if not self._has_namespace_storage_options:
-            return None
-        return create_storage_options_provider(
+            return {}
+        return _namespace_kwargs(
+            fn,
             self._namespace_impl,
             self._namespace_properties,
             self.table_id,
@@ -305,14 +339,14 @@ class _BaseLanceDatasink(Datasink):
 
         Raises whatever Lance raises if the dataset can't be opened (missing,
         bad ``storage_options``, etc.). Opening natively honors
-        ``storage_options``/``storage_options_provider``.
+        ``storage_options`` and any configured namespace.
         """
         import lance
 
         return lance.LanceDataset(
             self.uri,
             storage_options=self.storage_options,
-            storage_options_provider=self.storage_options_provider,
+            **self._namespace_kwargs(lance.LanceDataset),
         )
 
     def _dataset_exists(self) -> bool:
@@ -403,7 +437,7 @@ class _BaseLanceDatasink(Datasink):
             op,
             read_version=self.read_version,
             storage_options=self.storage_options,
-            storage_options_provider=self.storage_options_provider,
+            **self._namespace_kwargs(lance.LanceDataset.commit),
         )
 
 

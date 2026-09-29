@@ -241,15 +241,25 @@ def _parse_args(
     by keeping them in the command list instead of erroring and
     discarding them.
     """
+    original_args = list(args)
     parser.rargs = args
     parser.largs = []
     options = parser.get_default_values()
     try:
         parser._process_args(parser.largs, parser.rargs, options)
-    except optparse.BadOptionError as err:
-        # If we hit an argument that is not recognized, we put it
-        # back into the unconsumed arguments
-        parser.rargs = [err.opt_str] + parser.rargs
+    except optparse.BadOptionError:
+        # If we hit an argument that is not recognized, we put it back into
+        # the unconsumed arguments exactly as it was passed. We can't use
+        # err.opt_str for that: optparse has already split "--opt=value"
+        # into "--opt" and "value" (pushing "value" back onto rargs), and
+        # for short options err.opt_str is only the first unknown letter.
+        num_remaining = len(parser.rargs)
+        if parser.rargs == original_args[len(original_args) - num_remaining :]:
+            # The unrecognized argument was popped as a whole.
+            parser.rargs = original_args[len(original_args) - num_remaining - 1 :]
+        else:
+            # "--opt=value" was split and "value" was pushed back.
+            parser.rargs = original_args[len(original_args) - num_remaining :]
     return options, parser.rargs
 
 

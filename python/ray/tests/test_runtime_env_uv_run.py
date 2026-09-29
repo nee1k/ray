@@ -367,6 +367,23 @@ def test_uv_run_parser():
     assert options.module == "my_module.submodule"
     assert command == ["--model", "Qwen/Qwen3-32B"]
 
+    # Unknown "--opt=value" arguments are returned unchanged, not split into
+    # two tokens (https://github.com/ray-project/ray/issues/62650).
+    options, command = _parse_args(
+        parser,
+        ["-m", "ray.util.client.server", "--address=172.18.0.2:6379", "--port", "1"],
+    )
+    assert options.module == "ray.util.client.server"
+    assert command == ["--address=172.18.0.2:6379", "--port", "1"]
+
+    options, command = _parse_args(parser, ["--isolated", "--foo=a=b", "script.py"])
+    assert options.isolated
+    assert command == ["--foo=a=b", "script.py"]
+
+    # Unknown short option clusters are also returned unchanged.
+    options, command = _parse_args(parser, ["-xyz", "script.py"])
+    assert command == ["-xyz", "script.py"]
+
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Not ported to Windows yet.")
 def test_uv_run_runtime_env_hook_e2e(shutdown_only, temp_dir):

@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pyarrow.fs
+from packaging.version import InvalidVersion, Version
 
 import ray
 from ray import logger
@@ -56,6 +57,20 @@ WANDB_POPULATE_RUN_LOCATION_HOOK = "WANDB_POPULATE_RUN_LOCATION_HOOK"
 # It takes in a W&B run object and doesn't return anything.
 # Example: "your.module.wandb_process_run_info_hook".
 WANDB_PROCESS_RUN_INFO_HOOK = "WANDB_PROCESS_RUN_INFO_HOOK"
+
+
+def _get_wandb_reinit_value(wandb_module: Optional[ModuleType]) -> Any:
+    """Return the ``reinit`` value to pass to ``wandb.init``.
+
+    wandb>=0.19.11 deprecates ``reinit=True`` in favor of ``"finish_previous"``,
+    which has the same behavior and is supported since wandb 0.19.9. Fall back
+    to ``True`` for older versions, or if the version can't be determined.
+    """
+    try:
+        version = Version(getattr(wandb_module, "__version__", ""))
+    except InvalidVersion:
+        return True
+    return "finish_previous" if version >= Version("0.19.9") else True
 
 
 @PublicAPI(stability="alpha")
@@ -176,11 +191,13 @@ def _setup_wandb(
     # Remove unpickleable items.
     _config = _clean_log(_config)
 
+    _wandb = _wandb or wandb
+
     wandb_init_kwargs = dict(
         id=trial_id,
         name=trial_name,
         resume=True,
-        reinit=True,
+        reinit=_get_wandb_reinit_value(_wandb),
         allow_val_change=True,
         config=_config,
         project=project,
@@ -195,8 +212,6 @@ def _setup_wandb(
         os.environ["WANDB_START_METHOD"] = "thread"
     else:
         os.environ["WANDB_START_METHOD"] = "fork"
-
-    _wandb = _wandb or wandb
 
     run = _wandb.init(**wandb_init_kwargs)
     _run_wandb_process_run_info_hook(run)
@@ -688,7 +703,7 @@ class WandbLoggerCallback(LoggerCallback):
             id=trial_id,
             name=trial_name,
             resume=False,
-            reinit=True,
+            reinit=_get_wandb_reinit_value(wandb),
             allow_val_change=True,
             group=wandb_group,
             project=wandb_project,

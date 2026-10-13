@@ -51,6 +51,7 @@ from ray.air.integrations.wandb import (
     WANDB_PROJECT_ENV_VAR,
     WANDB_SETUP_API_KEY_HOOK,
     WandbLoggerCallback,
+    _get_wandb_reinit_value,
     _QueueItem,
     _WandbLoggingActor,
     setup_wandb,
@@ -245,6 +246,7 @@ class TestWandbLogger:
         assert logger_state.kwargs["id"] == trial.trial_id
         assert logger_state.kwargs["name"] == trial.trial_name
         assert logger_state.kwargs["group"] == trial.experiment_dir_name
+        assert logger_state.kwargs["reinit"] in (True, "finish_previous")
         assert "config" in logger_state.exclude
 
         del logger
@@ -517,6 +519,25 @@ class TestWandbLogger:
 
         assert len(logger._trial_logging_futures) == 1
         assert len(logger._logging_future_to_trial) == 1
+
+
+@pytest.mark.parametrize(
+    "version,expected",
+    [
+        ("0.19.8", True),
+        ("0.19.9", "finish_previous"),
+        ("0.24.2", "finish_previous"),
+        (None, True),
+        ("not-a-version", True),
+    ],
+)
+def test_get_wandb_reinit_value(version, expected):
+    """`reinit=True` is deprecated in newer wandb versions in favor of the
+    equivalent "finish_previous" (https://github.com/ray-project/ray/issues/53093).
+    """
+    wandb_module = Mock(spec=[]) if version is None else Mock(__version__=version)
+    assert _get_wandb_reinit_value(wandb_module) == expected
+    assert _get_wandb_reinit_value(None) is True
 
 
 def test_wandb_logging_process_run_info_hook(monkeypatch):

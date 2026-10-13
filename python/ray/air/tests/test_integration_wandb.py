@@ -52,6 +52,7 @@ from ray.air.integrations.wandb import (
     WANDB_SETUP_API_KEY_HOOK,
     WandbLoggerCallback,
     _QueueItem,
+    _set_wandb_start_method,
     _WandbLoggingActor,
     setup_wandb,
 )
@@ -517,6 +518,30 @@ class TestWandbLogger:
 
         assert len(logger._trial_logging_futures) == 1
         assert len(logger._logging_future_to_trial) == 1
+
+
+@pytest.mark.parametrize(
+    "version,expect_set",
+    [
+        ("0.19.11", True),
+        ("0.20.0", False),
+        ("0.24.2", False),
+        (None, True),
+        ("not-a-version", True),
+    ],
+)
+def test_set_wandb_start_method(monkeypatch, version, expect_set):
+    """wandb>=0.20 ignores `start_method` and warns that it's deprecated, so
+    WANDB_START_METHOD should only be set for older versions."""
+    monkeypatch.delenv("WANDB_START_METHOD", raising=False)
+    wandb_module = Mock(spec=[]) if version is None else Mock(__version__=version)
+
+    _set_wandb_start_method(wandb_module, "thread")
+
+    if expect_set:
+        assert os.environ["WANDB_START_METHOD"] == "thread"
+    else:
+        assert "WANDB_START_METHOD" not in os.environ
 
 
 def test_wandb_logging_process_run_info_hook(monkeypatch):

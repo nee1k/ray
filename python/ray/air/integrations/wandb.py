@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pyarrow.fs
+from packaging.version import InvalidVersion, Version
 
 import ray
 from ray import logger
@@ -56,6 +57,24 @@ WANDB_POPULATE_RUN_LOCATION_HOOK = "WANDB_POPULATE_RUN_LOCATION_HOOK"
 # It takes in a W&B run object and doesn't return anything.
 # Example: "your.module.wandb_process_run_info_hook".
 WANDB_PROCESS_RUN_INFO_HOOK = "WANDB_PROCESS_RUN_INFO_HOOK"
+
+
+def _set_wandb_start_method(
+    wandb_module: Optional[ModuleType], start_method: str
+) -> None:
+    """Set the ``WANDB_START_METHOD`` environment variable for wandb<0.20.
+
+    wandb>=0.20 ignores the ``start_method`` setting and warns that it's
+    deprecated on every run, and later versions removed it. Keep setting it if
+    the wandb version can't be determined.
+    """
+    try:
+        version = Version(getattr(wandb_module, "__version__", ""))
+    except InvalidVersion:
+        version = None
+    if version is not None and version >= Version("0.20.0"):
+        return
+    os.environ["WANDB_START_METHOD"] = start_method
 
 
 @PublicAPI(stability="alpha")
@@ -190,13 +209,10 @@ def _setup_wandb(
     # Update config (e.g. set any other parameters in the call to wandb.init)
     wandb_init_kwargs.update(**kwargs)
 
-    # On windows, we can't fork
-    if os.name == "nt":
-        os.environ["WANDB_START_METHOD"] = "thread"
-    else:
-        os.environ["WANDB_START_METHOD"] = "fork"
-
     _wandb = _wandb or wandb
+
+    # On windows, we can't fork
+    _set_wandb_start_method(_wandb, "thread" if os.name == "nt" else "fork")
 
     run = _wandb.init(**wandb_init_kwargs)
     _run_wandb_process_run_info_hook(run)
@@ -433,7 +449,7 @@ class _WandbLoggingActor:
 
     def run(self):
         # Since we're running in a separate process already, use threads.
-        os.environ["WANDB_START_METHOD"] = "thread"
+        _set_wandb_start_method(self._wandb, "thread")
         run = self._wandb.init(*self.args, **self.kwargs)
         run.config.trial_log_path = self._logdir
 

@@ -1,9 +1,12 @@
 import os
 import sys
+from unittest.mock import MagicMock
 
 import pytest
 
+from ray._private.runtime_env.packaging import get_uri_for_directory
 from ray.dashboard.modules.dashboard_sdk import (
+    SubmissionClient,
     parse_cluster_info,
     parse_runtime_env_args,
 )
@@ -97,6 +100,31 @@ def test_parse_cluster_info_ignores_extra_kwargs():
     """Test that parse_cluster_info with http:// gracefully ignores extra kwargs."""
     result = parse_cluster_info("http://localhost:8265", cloud="test")
     assert result.address == "http://localhost:8265"
+
+
+@pytest.mark.parametrize(
+    "status_code,expected_error",
+    [
+        # The dashboard rejects request bodies larger than its upload limit.
+        (413, r"too large .* 100\.00MiB.*'excludes'"),
+        (500, r"Request failed with status code 500"),
+    ],
+)
+def test_upload_package_error_message(tmp_path, status_code, expected_error):
+    # Regression test for https://github.com/ray-project/ray/issues/55877.
+    (tmp_path / "data.bin").write_bytes(b"0" * 1024)
+    # Skip __init__, which connects to the cluster.
+    client = SubmissionClient.__new__(SubmissionClient)
+    client._do_request = MagicMock(
+        return_value=MagicMock(status_code=status_code, text="error")
+    )
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        client._upload_package(
+            get_uri_for_directory(str(tmp_path), include_gitignore=True),
+            str(tmp_path),
+            include_gitignore=True,
+        )
 
 
 if __name__ == "__main__":

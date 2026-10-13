@@ -459,6 +459,8 @@ The `runtime_env` is a Python dictionary or a {class}`ray.runtime_env.RuntimeEnv
 
   In cases 1 through 3, Ray downloads the specified directory to each node on the cluster, and Ray workers start in their node's copy of this directory. In case 4, Ray uploads and downloads nothing, and the workers start directly in that directory. See {ref}`in-image-working-dir`.
 
+  When you submit a job through the Ray Jobs API, for example with `ray job submit` or `JobSubmissionClient`, Ray uploads a local directory or archive through the Ray Dashboard, which accepts at most 100 MiB per compressed package. For a larger working directory, add the files your job doesn't need to `excludes`, or upload the directory to remote storage and pass its URI.
+
   - Examples:
 
     - `"."  # cwd`
@@ -490,6 +492,8 @@ The `runtime_env` is a Python dictionary or a {class}`ray.runtime_env.RuntimeEnv
   1. A Python module object.
   1. A path to a local `.whl` file.
   1. A `local://` URI naming a directory that already exists on every node. See {ref}`in-image-working-dir`.
+
+  The 100 MiB limit on packages uploaded through the Ray Jobs API, described for `working_dir`, also applies to each local `py_modules` entry.
 
   - Examples of entries in the list:
 

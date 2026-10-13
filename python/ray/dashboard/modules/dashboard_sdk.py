@@ -12,11 +12,13 @@ import packaging.version
 import yaml
 
 import ray
+from ray._private import ray_constants
 from ray._private.authentication.http_token_authentication import (
     format_authentication_http_error,
     get_auth_headers_if_auth_enabled,
 )
 from ray._private.runtime_env.packaging import (
+    _mib_string,
     create_package,
     get_uri_for_directory,
     get_uri_for_package,
@@ -383,11 +385,26 @@ class SubmissionClient:
                     excludes=excludes,
                 )
             try:
+                package_bytes = package_file.read_bytes()
                 r = self._do_request(
                     "PUT",
                     f"/api/packages/{protocol}/{package_name}",
-                    data=package_file.read_bytes(),
+                    data=package_bytes,
                 )
+                if r.status_code == 413:
+                    raise RuntimeError(
+                        f"Failed to upload {package_path}: the package is "
+                        f"{_mib_string(len(package_bytes))} after compression, "
+                        "which is too large for the Ray Dashboard to accept "
+                        "(the limit for packages uploaded through the Ray Jobs "
+                        "API is "
+                        f"{_mib_string(ray_constants.DASHBOARD_CLIENT_MAX_SIZE)}). "
+                        "Add large files that the job doesn't need to "
+                        "'excludes' in the runtime_env, or upload the directory "
+                        "to remote storage and pass its URI (for example "
+                        "'s3://bucket/working_dir.zip') instead. Server "
+                        f"response: {r.text}"
+                    )
                 if r.status_code != 200:
                     self._raise_error(r)
             finally:
